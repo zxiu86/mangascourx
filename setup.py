@@ -8,7 +8,7 @@ setup(
     description="Advanced Multi-Scale PatchMatch & AI-Powered Text Removal Engine for Manga",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/zxui86/MangaScourX", # راح تغير اسم المستخدم هنا بعدين
+    url="https://github.com/zxui86/MangaScourX",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
@@ -20,7 +20,7 @@ setup(
         "numpy>=1.20.0",
         "opencv-python>=4.5.0",
         "numba>=0.53.0",
-        "torch>=1.9.0", # للموديل CRAFT الشهير
+        "torch>=1.9.0",
         "torchvision"
     ],
 )

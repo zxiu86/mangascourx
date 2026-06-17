@@ -1,4 +1,3 @@
-# mangascour/inpainting/patchmatch/engine.py
 """
 engine.py - Main PatchMatch inpainting engine
 """
@@ -254,25 +253,8 @@ class PatchMatchInpainter:
         n_rots, n_scales = len(rotations), len(scales)
         half = patch_size // 2
 
-        # We'll use Numba for the reconstruction loop to keep speed.
-        # Since it's inside a method, we can define a nested jit function.
-        # But we can also call a standalone jit function from core.
-        # For simplicity, we'll implement it as a nested function using numba.
-        # However, due to limitations, we'll use a separate jit function.
-        # I'll define a helper at module level, but for clarity I'll inline here
-        # with a local jit function.
-
-        # We'll use a standalone function from core (to be added) but to avoid changes,
-        # we can copy the reconstruction loop here. Since this is engine, we'll
-        # implement with a small jit function defined inside run? Not allowed.
-        # Instead, we'll use the original reconstruction function from patchmatch.
-        # I'll copy the code from the original _reconstruct_image_voting.
-        # Actually we can import it, but it's not in core. I'll paste it here.
-
-        # I'll copy the function from patchmatch.py verbatim.
-        # (It's already in the original file, so I'll just put it here.)
         from .core import extract_patch_bilinear, apply_cached_transform
-        # We'll define a local jit function.
+        
         @njit(cache=True)
         def reconstruct(img_pad, mask_pad, nnf_y, nnf_x, nnf_cost,
                         rot_idx, scale_idx, h, w, k, patch_size,

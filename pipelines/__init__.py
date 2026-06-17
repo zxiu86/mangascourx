@@ -1,6 +1,7 @@
-# mangascour/pipelines/__init__.py
-
-from .text_remove import TextRemovePipeline
 from .manga_clean import MangaCleanPipeline
+from .text_remove import TextRemovePipeline
 
-__all__ = ["TextRemovePipeline", "MangaCleanPipeline"]
+__all__ = [
+    "MangaCleanPipeline",
+    "TextRemovePipeline"
+]

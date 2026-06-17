@@ -1,4 +1,3 @@
-# mangascour/inpainting/patchmatch/core.py
 """
 core.py - Core utilities for PatchMatch inpainting
 """

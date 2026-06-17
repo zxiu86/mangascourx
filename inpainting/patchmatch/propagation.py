@@ -1,4 +1,3 @@
-# mangascour/inpainting/patchmatch/propagation.py
 """
 propagation.py - PatchMatch propagation, random search, coherence, and initialization
 """

@@ -1,4 +1,3 @@
-# mangascour/pipelines/text_remove.py
 from __future__ import annotations
 import numpy as np
 import cv2

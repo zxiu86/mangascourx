@@ -1,4 +1,3 @@
-# mangascour/pipelines/manga_clean.py
 from __future__ import annotations
 import numpy as np
 import cv2
