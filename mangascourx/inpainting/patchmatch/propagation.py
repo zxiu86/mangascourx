@@ -4,22 +4,14 @@ propagation.py - PatchMatch propagation, random search, coherence, and initializ
 
 import numpy as np
 import math
-# ── BUG FIX 9: was "from numba import njit, prange" with no fallback.
-#    core.py already has a proper fallback; do the same here. ────────────────
 try:
     from numba import njit, prange
-    HAS_NUMBA = True
 except ImportError:
-    HAS_NUMBA = False
-
     def njit(*args, **kwargs):
-        def decorator(func):
-            return func
+        def decorator(func): return func
         return decorator if (args and callable(args[0])) else decorator
-
     def prange(*args, **kwargs):
         return range(*args, **kwargs)
-# ────────────────────────────────────────────────────────────────────────────
 
 from .core import (
     extract_patch_bilinear, extract_mask_region,

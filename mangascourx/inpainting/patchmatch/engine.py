@@ -6,6 +6,15 @@ import numpy as np
 import math
 import time
 import warnings
+
+# ── BUG FIX: njit used inside _reconstruct_image_voting but never imported ──
+try:
+    from numba import njit
+except ImportError:
+    def njit(*args, **kwargs):
+        def decorator(func): return func
+        return decorator if (args and callable(args[0])) else decorator
+# ─────────────────────────────────────────────────────────────────────────────
 from .core import NNF, precompute_transform_maps, compute_gradients
 from .propagation import (
     initialize_nnf, recompute_nnf_costs,

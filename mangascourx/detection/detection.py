@@ -1,18 +1,12 @@
 """
-Central detection orchestrator – decides *what* to use and *when*.
+Central detection orchestrator.
 
-This module receives an image, selects the appropriate detectors
-(MSER, CRAFT, bubble segmentation), coordinates their execution,
-merges results with configurable priority, and returns a final
-unified mask.
-
-Philosophy
-----------
-- **Simple text**  → MSER (fast, no AI)
-- **Complex text** → CRAFT (AI-based, high detail)
-- **Bubbles**      → contour-based segmentation + morphology
-- **Fallback**     : if MSER returns too few candidates and CRAFT is
-  available, automatically switches to CRAFT.
+Bugs fixed vs original detection.py:
+  1. from .masks  → from .mask          (wrong module name)
+  2. class Detector → DetectionOrchestrator  (name mismatch with text_remove.py)
+  3. .run() method added                (text_remove.py calls .run(), original only had .detect())
+  4. detect_text_regions(**self.mser_params) → (mser_params=self.mser_params)
+     (function signature is (image, mser_params=None, ...) not (**kwargs))
 """
 
 from __future__ import annotations
@@ -28,16 +22,11 @@ from .bubbles.morphology import clean_noise
 from .bubbles.contours import detect_bubbles
 from .text.mser import detect_text_regions
 from .text.craft_adapter import CRAFTDetector
-# ── BUG FIX 5: was "from .masks import" but the file is mask.py ──────────────
-from .mask import process_masks
+from .mask import process_masks          # ← BUG FIX 1: was ".masks"
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
-
-# ---------------------------------------------------------------------------
-# Helper – simple bubble mask generation from an image
-# ---------------------------------------------------------------------------
 
 def _generate_bubble_mask(
     image: NDArray[np.uint8],
@@ -47,58 +36,30 @@ def _generate_bubble_mask(
     morph_open: int = 3,
     morph_close: int = 5,
 ) -> NDArray[np.uint8]:
-    """
-    Create a raw bubble candidate mask using adaptive thresholding.
-
-    Bubbles are typically bright, uniform regions on a darker background.
-    Adaptive thresholding captures them reliably without manual parameters.
-    """
-    if image.ndim == 3:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    else:
-        gray = image.copy()
-
+    """Adaptive-threshold bubble candidate mask."""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image.copy()
     mask = cv2.adaptiveThreshold(
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY, block_size, c,
     )
-
-    mask = clean_noise(
-        mask,
-        open_kernel_size=morph_open,
-        close_kernel_size=morph_close,
-    )
-    return mask
+    return clean_noise(mask, open_kernel_size=morph_open, close_kernel_size=morph_close)
 
 
-# ---------------------------------------------------------------------------
-# ── BUG FIX 3+4: class was named "Detector", imported as "DetectionOrchestrator"
-#    and had no run() method – text_remove.py calls .run(image, ...) ──────────
-# ---------------------------------------------------------------------------
-
+# ── BUG FIX 2: renamed from "Detector" → "DetectionOrchestrator" ─────────────
 class DetectionOrchestrator:
     """
-    Unified detector and orchestrator for text and bubbles.
+    Unified detector for text and bubbles.
 
     Parameters
     ----------
     craft_model_path : str or None
-        Path to CRAFT weights. If None, AI detection is disabled.
     device : str
-        PyTorch device for CRAFT (e.g., 'cpu', 'cuda').
-    mser_params : dict or None
-        Parameters forwarded to `detect_text_regions` as `mser_params=`.
+    mser_params : dict or None   — passed as mser_params= to detect_text_regions
     craft_params : dict or None
-        Keyword arguments forwarded to `CRAFTDetector`.
     bubble_params : dict or None
-        Keyword arguments for `_generate_bubble_mask`.
     merge_priority : list[str]
-        Priority order for mask merging.
     final_cleanup : bool
-        Apply morphological cleanup to the final merged mask.
     fallback_min_boxes : int
-        If MSER detects fewer than this number of boxes and CRAFT is
-        available, fall back to CRAFT automatically.
     """
 
     def __init__(
@@ -129,27 +90,21 @@ class DetectionOrchestrator:
                 )
             except Exception as e:
                 logger.warning(f"Failed to load CRAFT model: {e}")
-                self._craft_detector = None
 
     # ------------------------------------------------------------------
-    # Text detection
-    # ------------------------------------------------------------------
-
     def _detect_text(
         self, image: NDArray[np.uint8]
     ) -> Tuple[List[Tuple[int, int, int, int]], NDArray[np.uint8]]:
-        # ── BUG FIX 8: was detect_text_regions(image, **self.mser_params)
-        #    but the function signature is detect_text_regions(image, mser_params=None, ...)
-        #    Passing a flat dict via ** causes unexpected keyword argument errors. ──
-        boxes = detect_text_regions(image, mser_params=self.mser_params or None)
+        # ── BUG FIX 4: was detect_text_regions(image, **self.mser_params)
+        #    The function signature is (image, mser_params=None, filter_params=None)
+        #    Spreading the dict with ** passes wrong keyword arguments. ──────────
+        boxes = detect_text_regions(
+            image,
+            mser_params=self.mser_params or None,
+        )
 
-        if (
-            self._craft_detector is not None
-            and len(boxes) < self.fallback_min_boxes
-        ):
-            logger.info(
-                f"MSER found only {len(boxes)} boxes – falling back to CRAFT."
-            )
+        if self._craft_detector is not None and len(boxes) < self.fallback_min_boxes:
+            logger.info(f"MSER found {len(boxes)} boxes — falling back to CRAFT.")
             try:
                 boxes = self._craft_detector.detect(image)
             except Exception as e:
@@ -158,32 +113,21 @@ class DetectionOrchestrator:
         mask = np.zeros(image.shape[:2], dtype=np.uint8)
         for (x, y, w, h) in boxes:
             cv2.rectangle(mask, (x, y), (x + w, y + h), 255, thickness=-1)
-
         return boxes, mask
 
     # ------------------------------------------------------------------
-    # Bubble detection
-    # ------------------------------------------------------------------
-
     def _detect_bubbles(
         self, image: NDArray[np.uint8]
     ) -> Tuple[List[Tuple[int, int, int, int]], NDArray[np.uint8]]:
         raw_mask = _generate_bubble_mask(image, **self.bubble_params)
-
         bubble_data = detect_bubbles(raw_mask)
         contours = bubble_data["contours"]
         bounding_rects = bubble_data["bounding_rects"]
-
         mask = np.zeros(image.shape[:2], dtype=np.uint8)
         cv2.drawContours(mask, contours, -1, 255, thickness=-1)
-
         return bounding_rects, mask
 
     # ------------------------------------------------------------------
-    # Public API: detect() is the core method, run() is the alias
-    # that text_remove.py expects.
-    # ------------------------------------------------------------------
-
     def detect(
         self,
         image: NDArray[np.uint8],
@@ -191,7 +135,7 @@ class DetectionOrchestrator:
         enable_text: bool = True,
         enable_bubbles: bool = True,
     ) -> Dict:
-        """Run detection and return consolidated results."""
+        """Core detection method — returns dict with 'mask' and metadata."""
         masks_dict: Dict[str, NDArray[np.uint8]] = {}
         text_boxes: List = []
         bubble_boxes: List = []
@@ -204,7 +148,7 @@ class DetectionOrchestrator:
             bubble_boxes, bubble_mask = self._detect_bubbles(image)
             masks_dict["bubbles"] = bubble_mask
 
-        if len(masks_dict) == 0:
+        if not masks_dict:
             final_mask = np.zeros(image.shape[:2], dtype=np.uint8)
         else:
             final_mask = process_masks(
@@ -214,29 +158,25 @@ class DetectionOrchestrator:
                 return_labeled=False,
             )
 
-        result = {
-            "mask": final_mask,
-            "priority": self.merge_priority,
-        }
+        result: Dict = {"mask": final_mask, "priority": self.merge_priority}
         if enable_text:
             result["text_boxes"] = text_boxes
             result["text_mask"] = masks_dict.get("text")
         if enable_bubbles:
             result["bubble_boxes"] = bubble_boxes
             result["bubble_mask"] = masks_dict.get("bubbles")
-
         return result
 
-    # ── BUG FIX 4: text_remove.py calls self.detector.run(...) not .detect()
+    # ── BUG FIX 3: text_remove.py calls .run() not .detect() ────────────────
     def run(
         self,
         image: NDArray[np.uint8],
         enable_text: bool = True,
         enable_bubbles: bool = True,
     ) -> Dict:
-        """Alias for detect() – the pipeline uses .run() by convention."""
+        """Alias for detect() — the pipeline calls .run() by convention."""
         return self.detect(image, enable_text=enable_text, enable_bubbles=enable_bubbles)
 
 
-# Keep the old name as an alias for any code that used it directly
+# Backward-compat alias (old code that used "Detector" directly still works)
 Detector = DetectionOrchestrator
