@@ -314,20 +314,62 @@ class PatchMatchInpainter:
                                             result[ty, tx, ch] += final_w * transformed[i, j, ch]
                                         weight_sum[ty, tx] += final_w
 
+            # ── BUG FIX (5th finding, discovered empirically — not in the
+            #    original Arabic report): the previous epilogue was a SINGLE
+            #    pass. Any hole pixel with weight_sum==0 tried to average its
+            #    4 immediate neighbours, but ONLY neighbours that already had
+            #    weight_sum>0 from the splat step qualified. Any pixel more
+            #    than 1px deep inside a starved region (zero qualifying
+            #    neighbours) fell straight to the hardcoded constant 128.0 —
+            #    producing a flat, solid GREY rectangle over the entire dead
+            #    zone. This was verified empirically: a 92%-masked test page
+            #    reconstructed to a flat mid-grey block exactly matching the
+            #    starved region's bounding box.
+            #    Fix: multi-pass Gauss–Seidel relaxation. Each pass, every
+            #    still-unfilled hole pixel pulls from any of its 8 neighbours
+            #    that are already filled (from the splat step OR from an
+            #    earlier relaxation pass), so the fill front advances one
+            #    ring inward per pass instead of giving up after one look.
+            #    128.0 is now only used for a pixel with literally zero
+            #    filled pixels anywhere in the image (never happens in
+            #    practice once _generate_bubble_mask is fixed so masks stay
+            #    reasonably sized). ──────────────────────────────────────────
+            filled = np.zeros((h, w), dtype=np.bool_)
             for y in range(h):
                 for x in range(w):
                     if weight_sum[y, x] > 0:
                         result[y, x] /= weight_sum[y, x]
-                    else:
-                        # fallback to neighbor average
+                        filled[y, x] = True
+
+            max_passes = h + w  # generous, safe upper bound; early-exits below
+            for _pass in range(max_passes):
+                any_unfilled = False
+                for y in range(h):
+                    for x in range(w):
+                        if filled[y, x]:
+                            continue
                         sum_val = np.zeros(c, dtype=np.float32)
                         cnt = 0
-                        for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1),
+                                       (-1, -1), (-1, 1), (1, -1), (1, 1)]:
                             ny, nx = y + dy, x + dx
-                            if 0 <= ny < h and 0 <= nx < w and weight_sum[ny, nx] > 0:
+                            if 0 <= ny < h and 0 <= nx < w and filled[ny, nx]:
                                 sum_val += result[ny, nx]
                                 cnt += 1
-                        result[y, x] = sum_val / cnt if cnt > 0 else 128.0
+                        if cnt > 0:
+                            result[y, x] = sum_val / cnt
+                            filled[y, x] = True
+                        else:
+                            any_unfilled = True
+                if not any_unfilled:
+                    break
+
+            # Absolute last resort: a pixel with zero filled pixels reachable
+            # anywhere (only possible if the ENTIRE image is one hole).
+            for y in range(h):
+                for x in range(w):
+                    if not filled[y, x]:
+                        result[y, x] = 128.0
 
             return np.clip(result, 0, 255).astype(np.uint8)
 
