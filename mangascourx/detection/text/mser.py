@@ -82,13 +82,29 @@ def create_mser(
     Returns:
         Configured MSER object.
     """
-    return cv2.MSER_create(
-        _delta=delta,
-        _min_area=min_area,
-        _max_area=max_area,
-        _max_variation=max_variation,
-        _min_diversity=min_diversity,
-    )
+    # BUG FIX: cv2.MSER_create() dropped the underscore-prefixed kwarg
+    # names (_delta, _min_area, ...) starting around OpenCV 4.5.1+.
+    # Modern OpenCV (anything matching this package's own
+    # "opencv-python-headless>=4.5.0" requirement) raises:
+    #   TypeError: '_delta' is an invalid keyword argument for MSER_create()
+    # Try the modern names first, fall back to the legacy underscored
+    # names so this still works on old OpenCV 3.x/early-4.x wheels.
+    try:
+        return cv2.MSER_create(
+            delta=delta,
+            min_area=min_area,
+            max_area=max_area,
+            max_variation=max_variation,
+            min_diversity=min_diversity,
+        )
+    except TypeError:
+        return cv2.MSER_create(
+            _delta=delta,
+            _min_area=min_area,
+            _max_area=max_area,
+            _max_variation=max_variation,
+            _min_diversity=min_diversity,
+        )
 
 
 def _is_valid_region(
